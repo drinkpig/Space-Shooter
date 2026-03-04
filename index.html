@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter: Shield Edition</title>
+    <title>Space Shooter: Boss Battle</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -41,12 +41,14 @@
             const [gameState, setGameState] = useState('MENU');
             const [score, setScore] = useState(0);
             const [highScore, setHighScore] = useState(parseInt(localStorage.getItem('space_high_score') || '0'));
+            const [bossHp, setBossHp] = useState(0); // 用于 UI 显示
 
-            // 增加 hasShield 属性
             const playerRef = useRef({ x: 180, y: 540, w: 40, h: 40, powerLevel: 1, hasShield: true });
             const bulletsRef = useRef([]);
+            const enemyBulletsRef = useRef([]); // Boss 发出的子弹
             const enemiesRef = useRef([]);
-            const itemsRef = useRef([]); // 新增道具数组
+            const bossRef = useRef(null); // Boss 对象
+            const itemsRef = useRef([]);
             const particlesRef = useRef([]);
             const starsRef = useRef([]);
             const frameCountRef = useRef(0);
@@ -76,8 +78,9 @@
             const startGame = () => {
                 initAudio();
                 playerRef.current = { x: 180, y: 540, w: 40, h: 40, powerLevel: 1, hasShield: true };
-                bulletsRef.current = []; enemiesRef.current = []; itemsRef.current = []; particlesRef.current = [];
-                setScore(0); setGameState('PLAYING');
+                bulletsRef.current = []; enemyBulletsRef.current = []; enemiesRef.current = []; 
+                itemsRef.current = []; particlesRef.current = []; bossRef.current = null;
+                setScore(0); setBossHp(0); setGameState('PLAYING');
             };
 
             const update = useCallback(() => {
@@ -85,7 +88,10 @@
                 const ctx = canvas?.getContext('2d');
                 if (!canvas || !ctx) return;
 
-                ctx.fillStyle = '#020617'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                // 背景色：Boss 战时变暗红
+                ctx.fillStyle = bossRef.current ? '#1a0505' : '#020617'; 
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
                 ctx.fillStyle = '#ffffff';
                 starsRef.current.forEach(s => {
                     s.y = (s.y + s.speed) % CANVAS_HEIGHT;
@@ -96,9 +102,11 @@
                 if (gameState === 'PLAYING') {
                     playerRef.current.powerLevel = Math.floor(score / 500) + 1;
 
+                    // 移动控制
                     if (keysRef.current['ArrowLeft'] && playerRef.current.x > 0) playerRef.current.x -= 7;
                     if (keysRef.current['ArrowRight'] && playerRef.current.x < CANVAS_WIDTH - 40) playerRef.current.x += 7;
 
+                    // 玩家射击
                     if (frameCountRef.current % 10 === 0) {
                         const p = playerRef.current;
                         if (p.powerLevel === 1) {
@@ -110,91 +118,144 @@
                         playEffect(800, 'triangle', 0.05, 0.05);
                     }
 
-                    if (frameCountRef.current % 40 === 0) {
-                        const isTough = Math.random() > 0.8;
-                        enemiesRef.current.push({
-                            x: Math.random() * (CANVAS_WIDTH - 40), y: -40,
-                            w: isTough ? 45 : 30, h: isTough ? 40 : 30,
-                            hp: isTough ? 3 : 1, speed: Math.random() * 2 + 2, type: isTough ? 'elite' : 'normal'
-                        });
+                    // --- BOSS 逻辑 ---
+                    if (score > 0 && score % 2000 === 0 && !bossRef.current) {
+                        bossRef.current = { x: 50, y: -100, w: 300, h: 80, hp: 50, maxHp: 50, dir: 1 };
+                        playEffect(50, 'sawtooth', 1, 0.3); // 警告音
                     }
 
-                    // 更新逻辑
+                    if (bossRef.current) {
+                        const b = bossRef.current;
+                        // Boss 入场及左右移动
+                        if (b.y < 50) b.y += 1;
+                        b.x += b.dir * 2;
+                        if (b.x <= 0 || b.x + b.w >= CANVAS_WIDTH) b.dir *= -1;
+
+                        // Boss 射击 (扇形)
+                        if (frameCountRef.current % 60 === 0) {
+                            [-1, 0, 1].forEach(angle => {
+                                enemyBulletsRef.current.push({ x: b.x + b.w/2, y: b.y + b.h, vx: angle * 2, vy: 4 });
+                            });
+                            playEffect(200, 'square', 0.1, 0.1);
+                        }
+                        if (bossHp !== b.hp) setBossHp(b.hp);
+                    } else {
+                        // 没 Boss 时才生成普通敌人
+                        if (frameCountRef.current % 40 === 0) {
+                            const isTough = Math.random() > 0.8;
+                            enemiesRef.current.push({
+                                x: Math.random() * (CANVAS_WIDTH - 40), y: -40,
+                                w: isTough ? 45 : 30, h: isTough ? 40 : 30,
+                                hp: isTough ? 3 : 1, speed: Math.random() * 2 + 2, type: isTough ? 'elite' : 'normal'
+                            });
+                        }
+                    }
+
+                    // 更新子弹位置
                     bulletsRef.current.forEach((b, i) => { b.y -= 12; if(b.y < 0) bulletsRef.current.splice(i, 1); });
+                    enemyBulletsRef.current.forEach((eb, i) => { 
+                        eb.x += eb.vx; eb.y += eb.vy; 
+                        if(eb.y > CANVAS_HEIGHT) enemyBulletsRef.current.splice(i, 1); 
+                    });
                     enemiesRef.current.forEach((e, i) => { e.y += e.speed; if(e.y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1); });
                     itemsRef.current.forEach((it, i) => { it.y += 3; if(it.y > CANVAS_HEIGHT) itemsRef.current.splice(i, 1); });
 
-                    // 碰撞逻辑：子弹与敌人
+                    // 碰撞检测：玩家子弹击中 Boss
+                    if (bossRef.current) {
+                        const b = bossRef.current;
+                        bulletsRef.current.forEach((pb, pbi) => {
+                            if (pb.x < b.x + b.w && pb.x + pb.w > b.x && pb.y < b.y + b.h && pb.y + pb.h > b.y) {
+                                bulletsRef.current.splice(pbi, 1);
+                                b.hp--;
+                                createParticles(pb.x, pb.y, '#ffffff', 3);
+                                if (b.hp <= 0) {
+                                    createParticles(b.x + b.w/2, b.y + b.h/2, '#ef4444', 50);
+                                    playEffect(100, 'sawtooth', 1, 0.5);
+                                    itemsRef.current.push({ x: b.x + b.w/2, y: b.y + b.h/2, w: 20, h: 20 });
+                                    bossRef.current = null;
+                                    setBossHp(0);
+                                    setScore(s => s + 1000); // 击败奖励
+                                }
+                            }
+                        });
+                    }
+
+                    // 碰撞检测：Boss 子弹击中玩家
+                    enemyBulletsRef.current.forEach((eb, ebi) => {
+                        const p = playerRef.current;
+                        if (eb.x < p.x + p.w && eb.x + 8 > p.x && eb.y < p.y + p.h && eb.y + 8 > p.y) {
+                            enemyBulletsRef.current.splice(ebi, 1);
+                            if (p.hasShield) {
+                                p.hasShield = false;
+                                playEffect(300, 'square', 0.3, 0.2);
+                            } else {
+                                setGameState('GAME_OVER');
+                            }
+                        }
+                    });
+
+                    // 碰撞逻辑：常规敌机 (略，同之前)
                     enemiesRef.current.forEach((e, ei) => {
                         bulletsRef.current.forEach((b, bi) => {
                             if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
                                 bulletsRef.current.splice(bi, 1); e.hp--;
-                                createParticles(b.x, b.y, '#facc15', 2);
                                 if (e.hp <= 0) {
-                                    if (e.type === 'elite' && Math.random() < 0.3) {
-                                        itemsRef.current.push({ x: e.x + e.w/2 - 10, y: e.y, w: 20, h: 20 });
-                                    }
-                                    enemiesRef.current.splice(ei, 1);
-                                    setScore(s => s + (e.type === 'elite' ? 50 : 10));
+                                    enemiesRef.current.splice(ei, 1); setScore(s => s + (e.type === 'elite' ? 50 : 10));
                                     playEffect(150, 'sawtooth', 0.2, 0.1);
-                                    createParticles(e.x + e.w/2, e.y + e.h/2, e.type === 'elite' ? '#f97316' : '#ef4444', 12);
                                 }
                             }
                         });
-
-                        // 玩家碰撞敌人
                         const p = playerRef.current;
                         if (p.x < e.x + e.w && p.x + 40 > e.x && p.y < e.y + e.h && p.y + 40 > e.y) {
-                            if (p.hasShield) {
-                                p.hasShield = false;
-                                enemiesRef.current.splice(ei, 1);
-                                createParticles(p.x + 20, p.y + 20, '#60a5fa', 20);
-                                playEffect(300, 'square', 0.3, 0.2);
-                            } else {
-                                setGameState('GAME_OVER');
-                                playEffect(100, 'square', 0.5, 0.2);
-                            }
+                            if (p.hasShield) { p.hasShield = false; enemiesRef.current.splice(ei, 1); }
+                            else setGameState('GAME_OVER');
                         }
                     });
 
-                    // 玩家捡道具
+                    // 捡道具
                     itemsRef.current.forEach((it, i) => {
                         const p = playerRef.current;
                         if (p.x < it.x + it.w && p.x + 40 > it.x && p.y < it.y + it.h && p.y + 40 > it.y) {
                             itemsRef.current.splice(i, 1);
-                            if (p.hasShield) setScore(s => s + 100);
-                            else p.hasShield = true;
-                            playEffect(1200, 'sine', 0.2, 0.1);
+                            p.hasShield = true; playEffect(1200, 'sine', 0.2, 0.1);
                         }
                     });
 
-                    // 绘制道具
+                    // --- 渲染部分 ---
+                    // 绘制 Boss
+                    if (bossRef.current) {
+                        const b = bossRef.current;
+                        ctx.fillStyle = '#450a0a'; ctx.fillRect(b.x, b.y, b.w, b.h);
+                        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.strokeRect(b.x, b.y, b.w, b.h);
+                        // 核心发光
+                        ctx.fillStyle = (frameCountRef.current % 20 < 10) ? '#ef4444' : '#7f1d1d';
+                        ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, 20, 0, Math.PI*2); ctx.fill();
+                    }
+
+                    // 绘制道具 (绿球)
                     itemsRef.current.forEach(it => {
-                        ctx.fillStyle = '#4ade80';
-                        ctx.save();
-                        ctx.translate(it.x + 10, it.y + 10);
-                        ctx.rotate(frameCountRef.current * 0.1);
-                        ctx.fillRect(-8, -8, 16, 16);
-                        ctx.restore();
+                        ctx.fillStyle = '#4ade80'; ctx.beginPath(); ctx.arc(it.x + 10, it.y + 10, 10, 0, Math.PI*2); ctx.fill();
                     });
+
+                    // 绘制子弹
+                    ctx.fillStyle = '#facc15'; bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+                    ctx.fillStyle = '#ef4444'; enemyBulletsRef.current.forEach(eb => ctx.beginPath() || ctx.arc(eb.x, eb.y, 4, 0, Math.PI*2) || ctx.fill());
 
                     // 绘制玩家
                     const p = playerRef.current;
                     ctx.fillStyle = '#3b82f6'; ctx.beginPath();
                     ctx.moveTo(p.x + 20, p.y); ctx.lineTo(p.x + 40, p.y + 40); ctx.lineTo(p.x, p.y + 40); ctx.fill();
-                    // 绘制护盾
                     if (p.hasShield) {
-                        ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3;
-                        ctx.beginPath(); ctx.arc(p.x + 20, p.y + 20, 35, 0, Math.PI*2); ctx.stroke();
-                        ctx.globalAlpha = 0.2; ctx.fillStyle = '#60a5fa'; ctx.fill(); ctx.globalAlpha = 1.0;
+                        ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x + 20, p.y + 20, 35, 0, Math.PI*2); ctx.stroke();
                     }
 
-                    ctx.fillStyle = '#facc15'; bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+                    // 绘制敌人
                     enemiesRef.current.forEach(e => {
                         ctx.fillStyle = e.type === 'elite' ? '#f97316' : '#ef4444';
                         ctx.fillRect(e.x, e.y, e.w, e.h);
                     });
 
+                    // 粒子
                     particlesRef.current.forEach((pt, i) => {
                         pt.x += pt.vx; pt.y += pt.vy; pt.life--;
                         ctx.globalAlpha = pt.life / 30; ctx.fillStyle = pt.color;
@@ -204,7 +265,7 @@
                     ctx.globalAlpha = 1.0; frameCountRef.current++;
                 }
                 requestRef.current = requestAnimationFrame(update);
-            }, [gameState, score]);
+            }, [gameState, score, bossHp]);
 
             useEffect(() => {
                 requestRef.current = requestAnimationFrame(update);
@@ -232,28 +293,36 @@
             };
 
             return (
-                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 select-none font-mono" onTouchStart={initAudio} onClick={initAudio}>
+                <div className="min-h-screen bg-black flex items-center justify-center p-4 select-none font-mono" onTouchStart={initAudio} onClick={initAudio}>
                     <div className="relative bg-slate-900 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl">
-                        <div className="absolute top-4 left-4 z-10 text-blue-400 font-bold text-lg">
-                            SCORE: {score}<br/>
-                            <span className="text-sm text-slate-500">BEST: {highScore}</span>
+                        {/* 分数和血条 */}
+                        <div className="absolute top-4 left-4 z-10 text-blue-400 font-bold">
+                            SCORE: {score} | BEST: {highScore}
                         </div>
+                        
+                        {bossHp > 0 && (
+                            <div className="absolute top-12 left-1/2 -translate-x-1/2 w-64 h-4 bg-gray-800 border-2 border-red-500 rounded-full overflow-hidden z-20">
+                                <div className="h-full bg-red-600 transition-all duration-100" style={{width: `${(bossHp/50)*100}%`}}></div>
+                                <div className="absolute inset-0 text-[10px] text-white flex items-center justify-center font-black">BOSS MOTHERSHIP</div>
+                            </div>
+                        )}
+
                         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="block w-full max-w-[400px] h-auto touch-none" 
                             onPointerMove={handleTouch} onPointerDown={handleTouch} />
                         
                         {gameState === 'MENU' && (
-                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-center p-6">
-                                <h1 className="text-4xl font-black text-blue-500 mb-2">SHIELD DEFENDER</h1>
-                                <p className="text-slate-400 text-sm mb-8">Destroy Elite Ships to get Shield Refills!</p>
-                                <button onClick={startGame} className="px-12 py-4 bg-blue-600 text-white rounded-full font-bold text-xl hover:bg-blue-500 transition-all">START MISSION</button>
+                            <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center text-center p-6">
+                                <h1 className="text-4xl font-black text-red-600 mb-2 animate-pulse">BOSS INCOMING</h1>
+                                <p className="text-slate-400 text-xs mb-8 italic">Reach 2000 points to face the MotherShip.</p>
+                                <button onClick={startGame} className="px-12 py-4 bg-red-700 text-white rounded-full font-bold text-xl hover:bg-red-600 transition-all">START MISSION</button>
                             </div>
                         )}
                         
                         {gameState === 'GAME_OVER' && (
-                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
-                                <h2 className="text-5xl font-black text-white mb-2">MISSION FAILED</h2>
-                                <p className="text-blue-400 text-2xl mb-8 font-bold">SCORE: {score}</p>
-                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg">RETRY</button>
+                            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
+                                <h2 className="text-5xl font-black text-white mb-2">DESTROYED</h2>
+                                <p className="text-red-500 text-2xl mb-8 font-bold">FINAL SCORE: {score}</p>
+                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg">RE-LAUNCH</button>
                             </div>
                         )}
                     </div>

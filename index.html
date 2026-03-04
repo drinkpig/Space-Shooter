@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter - With Sound</title>
+    <title>Space Shooter Pro - v2.0</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -15,108 +15,71 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
 
-        // --- 音效合成器 (Web Audio API) ---
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-        const playSound = (type) => {
+        // --- 音效引擎 ---
+        let audioCtx = null;
+        const initAudio = () => {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
+        };
+        const playEffect = (freq, type, duration, volume) => {
+            if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-
-            if (type === 'shoot') {
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(110, audioCtx.currentTime + 0.1);
-                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.1);
-            } else if (type === 'explosion') {
-                // 模拟爆炸声 (低频噪波)
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(100, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.2);
-                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.2);
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.2);
-            } else if (type === 'gameover') {
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(440, audioCtx.currentTime);
-                osc.frequency.linearRampToValueAtTime(110, audioCtx.currentTime + 0.5);
-                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5);
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.5);
-            }
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + duration);
         };
 
         const CANVAS_WIDTH = 400;
         const CANVAS_HEIGHT = 600;
-        const PLAYER_SPEED = 6;
-        const BULLET_SPEED = 10;
-        const ENEMY_SPEED_MIN = 2;
-        const ENEMY_SPEED_MAX = 5;
-        const SPAWN_RATE = 45;
+        const PLAYER_SPEED = 7;
+        const BULLET_SPEED = 12;
 
         function App() {
             const canvasRef = useRef(null);
             const [gameState, setGameState] = useState('MENU');
             const [score, setScore] = useState(0);
+            const [highScore, setHighScore] = useState(parseInt(localStorage.getItem('space_high_score') || '0'));
 
-            const requestRef = useRef();
-            const playerRef = useRef({ x: CANVAS_WIDTH / 2 - 20, y: CANVAS_HEIGHT - 60, width: 40, height: 40 });
+            const playerRef = useRef({ x: 180, y: 540, width: 40, height: 40, powerLevel: 1 });
             const bulletsRef = useRef([]);
             const enemiesRef = useRef([]);
             const particlesRef = useRef([]);
             const starsRef = useRef([]);
             const frameCountRef = useRef(0);
             const keysRef = useRef({});
+            const requestRef = useRef();
 
+            // 初始化星星
             useEffect(() => {
-                const stars = [];
-                for (let i = 0; i < 70; i++) {
-                    stars.push({
-                        x: Math.random() * CANVAS_WIDTH,
-                        y: Math.random() * CANVAS_HEIGHT,
-                        size: Math.random() * 2 + 0.5,
-                        speed: Math.random() * 3 + 0.5
-                    });
-                }
-                starsRef.current = stars;
+                starsRef.current = Array.from({length: 80}, () => ({
+                    x: Math.random() * CANVAS_WIDTH,
+                    y: Math.random() * CANVAS_HEIGHT,
+                    size: Math.random() * 2,
+                    speed: Math.random() * 2 + 1
+                }));
             }, []);
 
-            const createParticles = useCallback((x, y, color, count) => {
+            // 粒子系统
+            const createParticles = (x, y, color, count) => {
                 for (let i = 0; i < count; i++) {
                     const angle = Math.random() * Math.PI * 2;
-                    const speed = Math.random() * 4 + 1;
+                    const speed = Math.random() * 5 + 2;
                     particlesRef.current.push({
-                        x, y,
-                        vx: Math.cos(angle) * speed,
-                        vy: Math.sin(angle) * speed,
-                        life: 20 + Math.random() * 20,
-                        maxLife: 40,
-                        color,
-                        size: Math.random() * 3 + 1
+                        x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                        life: 30, color, size: Math.random() * 3
                     });
                 }
-            }, []);
-
-            const initGame = useCallback(() => {
-                playerRef.current = { x: CANVAS_WIDTH / 2 - 20, y: CANVAS_HEIGHT - 60, width: 40, height: 40 };
-                bulletsRef.current = [];
-                enemiesRef.current = [];
-                particlesRef.current = [];
-                frameCountRef.current = 0;
-                setScore(0);
-            }, []);
+            };
 
             const startGame = () => {
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                initGame();
-                setGameState('PLAYING');
+                initAudio();
+                playerRef.current = { x: 180, y: 540, width: 40, height: 40, powerLevel: 1 };
+                bulletsRef.current = []; enemiesRef.current = []; particlesRef.current = [];
+                setScore(0); setGameState('PLAYING');
             };
 
             const update = useCallback(() => {
@@ -124,154 +87,157 @@
                 const ctx = canvas?.getContext('2d');
                 if (!canvas || !ctx) return;
 
-                ctx.fillStyle = '#0f172a';
-                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
+                // 绘制背景
+                ctx.fillStyle = '#020617'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
                 ctx.fillStyle = '#ffffff';
-                starsRef.current.forEach(star => {
-                    star.y += star.speed;
-                    if (star.y > CANVAS_HEIGHT) star.y = 0;
-                    ctx.globalAlpha = star.size / 3;
-                    ctx.beginPath();
-                    ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-                    ctx.fill();
+                starsRef.current.forEach(s => {
+                    s.y = (s.y + s.speed) % CANVAS_HEIGHT;
+                    ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
                 });
                 ctx.globalAlpha = 1.0;
 
                 if (gameState === 'PLAYING') {
-                    if (keysRef.current['ArrowLeft']) playerRef.current.x -= PLAYER_SPEED;
-                    if (keysRef.current['ArrowRight']) playerRef.current.x += PLAYER_SPEED;
+                    // 升级逻辑：每500分提升火力
+                    playerRef.current.powerLevel = Math.floor(score / 500) + 1;
 
-                    if (playerRef.current.x < 0) playerRef.current.x = 0;
-                    if (playerRef.current.x + playerRef.current.width > CANVAS_WIDTH) {
-                        playerRef.current.x = CANVAS_WIDTH - playerRef.current.width;
+                    // 移动
+                    if (keysRef.current['ArrowLeft'] && playerRef.current.x > 0) playerRef.current.x -= PLAYER_SPEED;
+                    if (keysRef.current['ArrowRight'] && playerRef.current.x < CANVAS_WIDTH - 40) playerRef.current.x += PLAYER_SPEED;
+
+                    // 自动射击
+                    if (frameCountRef.current % 10 === 0) {
+                        const p = playerRef.current;
+                        if (p.powerLevel === 1) {
+                            bulletsRef.current.push({ x: p.x + 17, y: p.y, w: 6, h: 15 });
+                        } else {
+                            // 双倍火力
+                            bulletsRef.current.push({ x: p.x + 5, y: p.y, w: 6, h: 15 });
+                            bulletsRef.current.push({ x: p.x + 29, y: p.y, w: 6, h: 15 });
+                        }
+                        playEffect(800, 'triangle', 0.05, 0.05);
                     }
 
-                    if (frameCountRef.current % 12 === 0) {
-                        bulletsRef.current.push({
-                            x: playerRef.current.x + playerRef.current.width / 2 - 3,
-                            y: playerRef.current.y,
-                            width: 6,
-                            height: 18
-                        });
-                        playSound('shoot'); // 播放射击音效
-                    }
-
-                    const currentSpawnRate = Math.max(15, SPAWN_RATE - Math.floor(frameCountRef.current / 600));
-                    if (frameCountRef.current % currentSpawnRate === 0) {
-                        const size = Math.random() * 25 + 20;
+                    // 生成敌人
+                    if (frameCountRef.current % 40 === 0) {
                         const isTough = Math.random() > 0.8;
                         enemiesRef.current.push({
-                            x: Math.random() * (CANVAS_WIDTH - size),
-                            y: -size, width: size, height: size,
-                            speed: Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN) + ENEMY_SPEED_MIN + (frameCountRef.current / 2000),
-                            hp: isTough ? 3 : 1,
-                            maxHp: isTough ? 3 : 1
+                            x: Math.random() * (CANVAS_WIDTH - 40), y: -40,
+                            w: isTough ? 45 : 30, h: isTough ? 40 : 30,
+                            hp: isTough ? 3 : 1, speed: Math.random() * 2 + 2, type: isTough ? 'elite' : 'normal'
                         });
                     }
 
-                    bulletsRef.current.forEach(b => b.y -= BULLET_SPEED);
-                    enemiesRef.current.forEach(e => e.y += e.speed);
+                    // 更新子弹和敌人
+                    bulletsRef.current.forEach((b, i) => { b.y -= BULLET_SPEED; if(b.y < 0) bulletsRef.current.splice(i, 1); });
+                    enemiesRef.current.forEach((e, i) => { 
+                        e.y += e.speed; 
+                        if(e.y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1); 
+                    });
 
-                    for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
-                        const e = enemiesRef.current[i];
-                        for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
-                            const b = bulletsRef.current[j];
-                            if (b.x < e.x + e.width && b.x + b.width > e.x && b.y < e.y + e.height && b.y + b.height > e.y) {
-                                bulletsRef.current.splice(j, 1);
-                                e.hp -= 1;
-                                createParticles(b.x + b.width/2, b.y, '#facc15', 3);
+                    // 碰撞逻辑
+                    enemiesRef.current.forEach((e, ei) => {
+                        // 子弹中敌
+                        bulletsRef.current.forEach((b, bi) => {
+                            if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
+                                bulletsRef.current.splice(bi, 1); e.hp--;
+                                createParticles(b.x, b.y, '#facc15', 2);
                                 if (e.hp <= 0) {
-                                    enemiesRef.current.splice(i, 1);
-                                    setScore(s => s + (e.maxHp > 1 ? 30 : 10));
-                                    playSound('explosion'); // 播放爆炸音效
-                                    createParticles(e.x + e.width/2, e.y + e.height/2, e.maxHp > 1 ? '#f97316' : '#ef4444', 15);
+                                    enemiesRef.current.splice(ei, 1);
+                                    setScore(s => s + (e.type === 'elite' ? 50 : 10));
+                                    playEffect(150, 'sawtooth', 0.2, 0.1);
+                                    createParticles(e.x + e.w/2, e.y + e.h/2, e.type === 'elite' ? '#f97316' : '#ef4444', 12);
                                 }
-                                break;
                             }
-                        }
-                    }
-
-                    const p = playerRef.current;
-                    for (let e of enemiesRef.current) {
-                        if (p.x < e.x + e.width && p.x + p.width > e.x && p.y < e.y + e.height && p.y + p.height > e.y) {
-                            playSound('gameover'); // 播放结束音效
-                            createParticles(p.x + p.width/2, p.y + p.height/2, '#3b82f6', 40);
+                        });
+                        // 敌人撞玩家
+                        const p = playerRef.current;
+                        if (p.x < e.x + e.w && p.x + 40 > e.x && p.y < e.y + e.h && p.y + 40 > e.y) {
                             setGameState('GAME_OVER');
+                            playEffect(100, 'square', 0.5, 0.2);
                         }
-                    }
+                    });
 
+                    // 绘制玩家
+                    const p = playerRef.current;
+                    ctx.fillStyle = '#3b82f6'; ctx.beginPath();
+                    ctx.moveTo(p.x + 20, p.y); ctx.lineTo(p.x + 40, p.y + 40); ctx.lineTo(p.x, p.y + 40); ctx.fill();
+                    // 引擎火焰
+                    ctx.fillStyle = '#fbbf24'; ctx.fillRect(p.x + 15, p.y + 40, 10, Math.random() * 10);
+
+                    // 绘制子弹
+                    ctx.fillStyle = '#facc15';
+                    bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+                    // 绘制敌人
+                    enemiesRef.current.forEach(e => {
+                        ctx.fillStyle = e.type === 'elite' ? '#f97316' : '#ef4444';
+                        ctx.fillRect(e.x, e.y, e.w, e.h);
+                    });
+
+                    // 粒子动画
                     particlesRef.current.forEach((pt, i) => {
-                        pt.x += pt.vx; pt.y += pt.vy; pt.life -= 1;
+                        pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+                        ctx.globalAlpha = pt.life / 30; ctx.fillStyle = pt.color;
+                        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
                         if (pt.life <= 0) particlesRef.current.splice(i, 1);
                     });
-
-                    ctx.fillStyle = '#3b82f6';
-                    ctx.beginPath();
-                    ctx.moveTo(p.x + p.width / 2, p.y);
-                    ctx.lineTo(p.x + p.width, p.y + p.height);
-                    ctx.lineTo(p.x, p.y + p.height);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    ctx.fillStyle = '#facc15';
-                    bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
-
-                    enemiesRef.current.forEach(e => {
-                        ctx.fillStyle = e.maxHp > 1 ? '#ea580c' : '#ef4444';
-                        ctx.fillRect(e.x, e.y, e.width, e.height);
-                    });
-
-                    particlesRef.current.forEach(pt => {
-                        ctx.globalAlpha = pt.life / pt.maxLife;
-                        ctx.fillStyle = pt.color;
-                        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
-                    });
-                    ctx.globalAlpha = 1.0;
-                    frameCountRef.current++;
+                    ctx.globalAlpha = 1.0; frameCountRef.current++;
                 }
                 requestRef.current = requestAnimationFrame(update);
-            }, [gameState, createParticles, initGame]);
+            }, [gameState, score]);
 
             useEffect(() => {
                 requestRef.current = requestAnimationFrame(update);
                 return () => cancelAnimationFrame(requestRef.current);
             }, [update]);
 
+            // 处理最高分
+            useEffect(() => {
+                if (gameState === 'GAME_OVER' && score > highScore) {
+                    setHighScore(score); localStorage.setItem('space_high_score', score.toString());
+                }
+            }, [gameState, score]);
+
             useEffect(() => {
                 const dn = (e) => keysRef.current[e.code] = true;
                 const up = (e) => keysRef.current[e.code] = false;
-                window.addEventListener('keydown', dn);
-                window.addEventListener('keyup', up);
+                window.addEventListener('keydown', dn); window.addEventListener('keyup', up);
                 return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
             }, []);
 
-            const handlePointerMove = (e) => {
+            const handleTouch = (e) => {
                 if (gameState !== 'PLAYING') return;
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const x = (e.clientX - rect.left) * scaleX;
-                playerRef.current.x = x - playerRef.current.width / 2;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = (e.clientX || e.touches[0].clientX) - rect.left;
+                playerRef.current.x = (x * CANVAS_WIDTH / rect.width) - 20;
             };
 
             return (
-                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 select-none">
-                    <div className="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
-                        <div className="absolute top-4 left-4 z-10 text-white font-mono text-xl font-bold">SCORE: {score}</div>
-                        <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="block w-full max-w-[400px] h-auto touch-none" onPointerMove={handlePointerMove} onPointerDown={handlePointerMove} />
+                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 select-none font-mono" onTouchStart={initAudio} onClick={initAudio}>
+                    <div className="relative bg-slate-900 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-[0_0_50px_rgba(59,130,246,0.2)]">
+                        <div className="absolute top-4 left-4 z-10 text-blue-400 font-bold text-lg">
+                            SCORE: {score}<br/>
+                            <span className="text-sm text-slate-500">BEST: {highScore}</span>
+                        </div>
+                        {score >= 500 && gameState === 'PLAYING' && (
+                            <div className="absolute top-4 right-4 z-10 text-yellow-400 animate-pulse font-bold">POWER LVL {Math.floor(score/500)+1}</div>
+                        )}
+                        <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="block w-full max-w-[400px] h-auto touch-none" 
+                            onPointerMove={handleTouch} onPointerDown={handleTouch} />
+                        
                         {gameState === 'MENU' && (
-                            <div className="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center">
-                                <h1 className="text-4xl font-black text-blue-500 mb-6">SPACE SHOOTER</h1>
-                                <button onClick={startGame} className="px-10 py-4 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-500">START GAME</button>
+                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center">
+                                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-b from-blue-400 to-blue-700 mb-8 tracking-tighter">STAR HUNTER</h1>
+                                <button onClick={startGame} className="px-12 py-4 bg-blue-600 text-white rounded-full font-bold text-xl hover:bg-blue-500 shadow-lg shadow-blue-900/50 transition-all active:scale-95">LAUNCH MISSION</button>
+                                <p className="mt-6 text-slate-500 text-sm italic">Move to survive. Fire is automatic.</p>
                             </div>
                         )}
+                        
                         {gameState === 'GAME_OVER' && (
-                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center">
-                                <h2 className="text-5xl font-black text-red-500 mb-2">GAME OVER</h2>
-                                <p className="text-white text-2xl mb-8">SCORE: {score}</p>
-                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold hover:bg-slate-200">PLAY AGAIN</button>
+                            <div className="absolute inset-0 bg-red-950/40 backdrop-blur-sm flex flex-col items-center justify-center text-center">
+                                <h2 className="text-6xl font-black text-white mb-2">CRASHED</h2>
+                                <p className="text-red-400 text-2xl mb-8 font-bold">FINAL SCORE: {score}</p>
+                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg hover:bg-slate-200 transition-all active:scale-95">REPAIR & RE-LAUNCH</button>
                             </div>
                         )}
                     </div>

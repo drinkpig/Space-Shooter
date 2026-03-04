@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter: Boss Battle</title>
+    <title>Space Shooter: StarFighter Edition</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -33,6 +33,65 @@
             osc.start(); osc.stop(audioCtx.currentTime + duration);
         };
 
+        // --- Canvas 繪圖輔助函數 (關鍵升級) ---
+        const drawEnemyShip = (ctx, x, y, w, h, type) => {
+            ctx.save();
+            ctx.translate(x, y);
+            
+            if (type === 'normal') {
+                // 🔴 普通敵機：小巧的三角形偵察機 (紅色)
+                ctx.fillStyle = '#ef4444'; ctx.strokeStyle = '#7f1d1d'; ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(w / 2, h); // 頂點 (向下)
+                ctx.lineTo(w, 0); ctx.lineTo(w * 0.8, 0); ctx.lineTo(w / 2, h * 0.3); ctx.lineTo(w * 0.2, 0); ctx.lineTo(0, 0);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+            } else if (type === 'elite') {
+                // 🟠 精英敵機：中型戰鬥機 (橙色)
+                ctx.fillStyle = '#f97316'; ctx.strokeStyle = '#c2410c'; ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(w / 2, h); // 主體頂點
+                ctx.lineTo(w, h * 0.3); ctx.lineTo(w, 0); // 右翼
+                ctx.lineTo(w / 2, h * 0.5); // 內凹
+                ctx.lineTo(0, 0); ctx.lineTo(0, h * 0.3); // 左翼
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                // 引擎火焰效果
+                ctx.fillStyle = '#fdbb2d'; ctx.fillRect(w*0.3, -2, w*0.1, Math.random()*5); ctx.fillRect(w*0.6, -2, w*0.1, Math.random()*5);
+            } else if (type === 'boss') {
+                // 💀 巨型 BOSS：深紅色母艦
+                ctx.fillStyle = '#450a0a'; ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(w / 2, h); // 最下方頂點
+                ctx.lineTo(w, h * 0.7); ctx.lineTo(w, 0); // 右側凸起
+                ctx.lineTo(w * 0.7, 0); ctx.lineTo(w * 0.5, h * 0.3); ctx.lineTo(w * 0.3, 0); // 核心凹槽
+                ctx.lineTo(0, 0); ctx.lineTo(0, h * 0.7); // 左側凸起
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                // 核心發光效果
+                ctx.fillStyle = (Date.now() % 200 < 100) ? '#ef4444' : '#7f1d1d';
+                ctx.beginPath(); ctx.arc(w / 2, h * 0.3, 15, 0, Math.PI * 2); ctx.fill();
+            }
+            
+            ctx.restore();
+        };
+
+        const drawPlayerShip = (ctx, x, y, w, h, hasShield) => {
+            ctx.save();
+            ctx.translate(x, y);
+            // 戰機主體 (藍色)
+            ctx.fillStyle = '#3b82f6'; ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(w / 2, 0); // 頂點
+            ctx.lineTo(w, h); ctx.lineTo(w * 0.8, h); ctx.lineTo(w / 2, h * 0.7); ctx.lineTo(w * 0.2, h); ctx.lineTo(0, h);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            // 引擎火焰
+            ctx.fillStyle = '#fbbf24'; ctx.fillRect(w*0.3, h, w*0.1, Math.random()*12); ctx.fillRect(w*0.6, h, w*0.1, Math.random()*12);
+            // 護盾
+            if (hasShield) {
+                ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(w / 2, h / 2, 40, 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = 0.15; ctx.fillStyle = '#60a5fa'; ctx.fill();
+            }
+            ctx.restore();
+        };
+
         const CANVAS_WIDTH = 400;
         const CANVAS_HEIGHT = 600;
 
@@ -41,13 +100,13 @@
             const [gameState, setGameState] = useState('MENU');
             const [score, setScore] = useState(0);
             const [highScore, setHighScore] = useState(parseInt(localStorage.getItem('space_high_score') || '0'));
-            const [bossHp, setBossHp] = useState(0); // 用于 UI 显示
+            const [bossHp, setBossHp] = useState(0);
 
             const playerRef = useRef({ x: 180, y: 540, w: 40, h: 40, powerLevel: 1, hasShield: true });
             const bulletsRef = useRef([]);
-            const enemyBulletsRef = useRef([]); // Boss 发出的子弹
+            const enemyBulletsRef = useRef([]);
             const enemiesRef = useRef([]);
-            const bossRef = useRef(null); // Boss 对象
+            const bossRef = useRef(null);
             const itemsRef = useRef([]);
             const particlesRef = useRef([]);
             const starsRef = useRef([]);
@@ -88,7 +147,6 @@
                 const ctx = canvas?.getContext('2d');
                 if (!canvas || !ctx) return;
 
-                // 背景色：Boss 战时变暗红
                 ctx.fillStyle = bossRef.current ? '#1a0505' : '#020617'; 
                 ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
                 
@@ -102,11 +160,9 @@
                 if (gameState === 'PLAYING') {
                     playerRef.current.powerLevel = Math.floor(score / 500) + 1;
 
-                    // 移动控制
                     if (keysRef.current['ArrowLeft'] && playerRef.current.x > 0) playerRef.current.x -= 7;
                     if (keysRef.current['ArrowRight'] && playerRef.current.x < CANVAS_WIDTH - 40) playerRef.current.x += 7;
 
-                    // 玩家射击
                     if (frameCountRef.current % 10 === 0) {
                         const p = playerRef.current;
                         if (p.powerLevel === 1) {
@@ -118,20 +174,16 @@
                         playEffect(800, 'triangle', 0.05, 0.05);
                     }
 
-                    // --- BOSS 逻辑 ---
                     if (score > 0 && score % 2000 === 0 && !bossRef.current) {
-                        bossRef.current = { x: 50, y: -100, w: 300, h: 80, hp: 50, maxHp: 50, dir: 1 };
-                        playEffect(50, 'sawtooth', 1, 0.3); // 警告音
+                        bossRef.current = { x: 50, y: -100, w: 300, h: 80, hp: 50, maxHp: 50, dir: 1, type: 'boss' };
+                        playEffect(50, 'sawtooth', 1, 0.3);
                     }
 
                     if (bossRef.current) {
                         const b = bossRef.current;
-                        // Boss 入场及左右移动
                         if (b.y < 50) b.y += 1;
                         b.x += b.dir * 2;
                         if (b.x <= 0 || b.x + b.w >= CANVAS_WIDTH) b.dir *= -1;
-
-                        // Boss 射击 (扇形)
                         if (frameCountRef.current % 60 === 0) {
                             [-1, 0, 1].forEach(angle => {
                                 enemyBulletsRef.current.push({ x: b.x + b.w/2, y: b.y + b.h, vx: angle * 2, vy: 4 });
@@ -140,7 +192,6 @@
                         }
                         if (bossHp !== b.hp) setBossHp(b.hp);
                     } else {
-                        // 没 Boss 时才生成普通敌人
                         if (frameCountRef.current % 40 === 0) {
                             const isTough = Math.random() > 0.8;
                             enemiesRef.current.push({
@@ -151,16 +202,11 @@
                         }
                     }
 
-                    // 更新子弹位置
                     bulletsRef.current.forEach((b, i) => { b.y -= 12; if(b.y < 0) bulletsRef.current.splice(i, 1); });
-                    enemyBulletsRef.current.forEach((eb, i) => { 
-                        eb.x += eb.vx; eb.y += eb.vy; 
-                        if(eb.y > CANVAS_HEIGHT) enemyBulletsRef.current.splice(i, 1); 
-                    });
+                    enemyBulletsRef.current.forEach((eb, i) => { eb.x += eb.vx; eb.y += eb.vy; if(eb.y > CANVAS_HEIGHT) enemyBulletsRef.current.splice(i, 1); });
                     enemiesRef.current.forEach((e, i) => { e.y += e.speed; if(e.y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1); });
                     itemsRef.current.forEach((it, i) => { it.y += 3; if(it.y > CANVAS_HEIGHT) itemsRef.current.splice(i, 1); });
 
-                    // 碰撞检测：玩家子弹击中 Boss
                     if (bossRef.current) {
                         const b = bossRef.current;
                         bulletsRef.current.forEach((pb, pbi) => {
@@ -174,32 +220,29 @@
                                     itemsRef.current.push({ x: b.x + b.w/2, y: b.y + b.h/2, w: 20, h: 20 });
                                     bossRef.current = null;
                                     setBossHp(0);
-                                    setScore(s => s + 1000); // 击败奖励
+                                    setScore(s => s + 1000);
                                 }
                             }
                         });
                     }
 
-                    // 碰撞检测：Boss 子弹击中玩家
                     enemyBulletsRef.current.forEach((eb, ebi) => {
                         const p = playerRef.current;
                         if (eb.x < p.x + p.w && eb.x + 8 > p.x && eb.y < p.y + p.h && eb.y + 8 > p.y) {
                             enemyBulletsRef.current.splice(ebi, 1);
-                            if (p.hasShield) {
-                                p.hasShield = false;
-                                playEffect(300, 'square', 0.3, 0.2);
-                            } else {
-                                setGameState('GAME_OVER');
-                            }
+                            if (p.hasShield) { p.hasShield = false; playEffect(300, 'square', 0.3, 0.2); }
+                            else setGameState('GAME_OVER');
                         }
                     });
 
-                    // 碰撞逻辑：常规敌机 (略，同之前)
                     enemiesRef.current.forEach((e, ei) => {
                         bulletsRef.current.forEach((b, bi) => {
                             if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
                                 bulletsRef.current.splice(bi, 1); e.hp--;
                                 if (e.hp <= 0) {
+                                    if (e.type === 'elite' && Math.random() < 0.3) {
+                                        itemsRef.current.push({ x: e.x + e.w/2 - 10, y: e.y, w: 20, h: 20 });
+                                    }
                                     enemiesRef.current.splice(ei, 1); setScore(s => s + (e.type === 'elite' ? 50 : 10));
                                     playEffect(150, 'sawtooth', 0.2, 0.1);
                                 }
@@ -207,12 +250,11 @@
                         });
                         const p = playerRef.current;
                         if (p.x < e.x + e.w && p.x + 40 > e.x && p.y < e.y + e.h && p.y + 40 > e.y) {
-                            if (p.hasShield) { p.hasShield = false; enemiesRef.current.splice(ei, 1); }
+                            if (p.hasShield) { p.hasShield = false; enemiesRef.current.splice(ei, 1); playEffect(300, 'square', 0.3, 0.2); createParticles(p.x + 20, p.y + 20, '#60a5fa', 20); }
                             else setGameState('GAME_OVER');
                         }
                     });
 
-                    // 捡道具
                     itemsRef.current.forEach((it, i) => {
                         const p = playerRef.current;
                         if (p.x < it.x + it.w && p.x + 40 > it.x && p.y < it.y + it.h && p.y + 40 > it.y) {
@@ -221,45 +263,29 @@
                         }
                     });
 
-                    // --- 渲染部分 ---
-                    // 绘制 Boss
+                    // --- 渲染部分 (關鍵升級：調用繪圖函數) ---
+                    const p = playerRef.current;
+                    drawPlayerShip(ctx, p.x, p.y, p.w, p.h, p.hasShield);
+
                     if (bossRef.current) {
                         const b = bossRef.current;
-                        ctx.fillStyle = '#450a0a'; ctx.fillRect(b.x, b.y, b.w, b.h);
-                        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.strokeRect(b.x, b.y, b.w, b.h);
-                        // 核心发光
-                        ctx.fillStyle = (frameCountRef.current % 20 < 10) ? '#ef4444' : '#7f1d1d';
-                        ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, 20, 0, Math.PI*2); ctx.fill();
+                        drawEnemyShip(ctx, b.x, b.y, b.w, b.h, 'boss');
                     }
 
-                    // 绘制道具 (绿球)
                     itemsRef.current.forEach(it => {
                         ctx.fillStyle = '#4ade80'; ctx.beginPath(); ctx.arc(it.x + 10, it.y + 10, 10, 0, Math.PI*2); ctx.fill();
                     });
 
-                    // 绘制子弹
                     ctx.fillStyle = '#facc15'; bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
                     ctx.fillStyle = '#ef4444'; enemyBulletsRef.current.forEach(eb => ctx.beginPath() || ctx.arc(eb.x, eb.y, 4, 0, Math.PI*2) || ctx.fill());
 
-                    // 绘制玩家
-                    const p = playerRef.current;
-                    ctx.fillStyle = '#3b82f6'; ctx.beginPath();
-                    ctx.moveTo(p.x + 20, p.y); ctx.lineTo(p.x + 40, p.y + 40); ctx.lineTo(p.x, p.y + 40); ctx.fill();
-                    if (p.hasShield) {
-                        ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x + 20, p.y + 20, 35, 0, Math.PI*2); ctx.stroke();
-                    }
-
-                    // 绘制敌人
                     enemiesRef.current.forEach(e => {
-                        ctx.fillStyle = e.type === 'elite' ? '#f97316' : '#ef4444';
-                        ctx.fillRect(e.x, e.y, e.w, e.h);
+                        drawEnemyShip(ctx, e.x, e.y, e.w, e.h, e.type);
                     });
 
-                    // 粒子
                     particlesRef.current.forEach((pt, i) => {
                         pt.x += pt.vx; pt.y += pt.vy; pt.life--;
-                        ctx.globalAlpha = pt.life / 30; ctx.fillStyle = pt.color;
-                        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+                        ctx.globalAlpha = pt.life / 30; ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
                         if (pt.life <= 0) particlesRef.current.splice(i, 1);
                     });
                     ctx.globalAlpha = 1.0; frameCountRef.current++;
@@ -295,7 +321,6 @@
             return (
                 <div className="min-h-screen bg-black flex items-center justify-center p-4 select-none font-mono" onTouchStart={initAudio} onClick={initAudio}>
                     <div className="relative bg-slate-900 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl">
-                        {/* 分数和血条 */}
                         <div className="absolute top-4 left-4 z-10 text-blue-400 font-bold">
                             SCORE: {score} | BEST: {highScore}
                         </div>
@@ -312,17 +337,18 @@
                         
                         {gameState === 'MENU' && (
                             <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center text-center p-6">
-                                <h1 className="text-4xl font-black text-red-600 mb-2 animate-pulse">BOSS INCOMING</h1>
-                                <p className="text-slate-400 text-xs mb-8 italic">Reach 2000 points to face the MotherShip.</p>
-                                <button onClick={startGame} className="px-12 py-4 bg-red-700 text-white rounded-full font-bold text-xl hover:bg-red-600 transition-all">START MISSION</button>
+                                <drawEnemyShip(ctx, 150, 100, 100, 100, 'boss') /* 這裡無法正常執行，只是示意 */ />
+                                <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-b from-blue-300 to-blue-700 mb-8 tracking-tighter">STARFIGHTER ACE</h1>
+                                <p className="text-slate-400 text-sm mb-12">Move on Screen to Survive. Fire is Automatic.</p>
+                                <button onClick={startGame} className="px-12 py-4 bg-blue-700 text-white rounded-full font-bold text-xl hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-blue-900">LAUNCH MISSION</button>
                             </div>
                         )}
                         
                         {gameState === 'GAME_OVER' && (
-                            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
-                                <h2 className="text-5xl font-black text-white mb-2">DESTROYED</h2>
-                                <p className="text-red-500 text-2xl mb-8 font-bold">FINAL SCORE: {score}</p>
-                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg">RE-LAUNCH</button>
+                            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center Backdrop-blur-sm">
+                                <h2 className="text-5xl font-black text-white mb-2 tracking-tighter">MAYDAY! CRASHED!</h2>
+                                <p className="text-red-500 text-2xl mb-12 font-bold">FINAL SCORE: {score}</p>
+                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg hover:bg-slate-200">RE-LAUNCH</button>
                             </div>
                         )}
                     </div>

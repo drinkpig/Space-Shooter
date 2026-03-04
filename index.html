@@ -3,20 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter - Google AI Studio</title>
+    <title>Space Shooter - Final Fix</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // 这里的代码是从你的 App.tsx 提取并适配单文件的核心逻辑
+        // 彻底移除 TypeScript 类型定义，改为纯 JS
         const { useState, useEffect, useRef, useCallback } = React;
-        const { Play, RotateCcw } = lucide;
 
         const CANVAS_WIDTH = 400;
         const CANVAS_HEIGHT = 600;
@@ -41,14 +39,16 @@
             const keysRef = useRef({});
 
             useEffect(() => {
+                const stars = [];
                 for (let i = 0; i < 70; i++) {
-                    starsRef.current.push({
+                    stars.push({
                         x: Math.random() * CANVAS_WIDTH,
                         y: Math.random() * CANVAS_HEIGHT,
                         size: Math.random() * 2 + 0.5,
                         speed: Math.random() * 3 + 0.5
                     });
                 }
+                starsRef.current = stars;
             }, []);
 
             const createParticles = useCallback((x, y, color, count) => {
@@ -76,10 +76,10 @@
                 setScore(0);
             }, []);
 
-            const startGame = useCallback(() => {
+            const startGame = () => {
                 initGame();
                 setGameState('PLAYING');
-            }, [initGame]);
+            };
 
             const update = useCallback(() => {
                 const canvas = canvasRef.current;
@@ -92,10 +92,7 @@
                 ctx.fillStyle = '#ffffff';
                 starsRef.current.forEach(star => {
                     star.y += star.speed;
-                    if (star.y > CANVAS_HEIGHT) {
-                        star.y = 0;
-                        star.x = Math.random() * CANVAS_WIDTH;
-                    }
+                    if (star.y > CANVAS_HEIGHT) star.y = 0;
                     ctx.globalAlpha = star.size / 3;
                     ctx.beginPath();
                     ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
@@ -134,15 +131,8 @@
                         });
                     }
 
-                    for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
-                        bulletsRef.current[i].y -= BULLET_SPEED;
-                        if (bulletsRef.current[i].y + bulletsRef.current[i].height < 0) bulletsRef.current.splice(i, 1);
-                    }
-
-                    for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
-                        enemiesRef.current[i].y += enemiesRef.current[i].speed;
-                        if (enemiesRef.current[i].y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1);
-                    }
+                    bulletsRef.current.forEach(b => b.y -= BULLET_SPEED);
+                    enemiesRef.current.forEach(e => e.y += e.speed);
 
                     for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
                         const e = enemiesRef.current[i];
@@ -163,16 +153,100 @@
                     }
 
                     const p = playerRef.current;
-                    for (let i = 0; i < enemiesRef.current.length; i++) {
-                        const e = enemiesRef.current[i];
-                        const hitboxShrink = 5;
-                        if (p.x + hitboxShrink < e.x + e.width - hitboxShrink && p.x + p.width - hitboxShrink > e.x + hitboxShrink && p.y + hitboxShrink < e.y + e.height - hitboxShrink && p.y + p.height - hitboxShrink > e.y + hitboxShrink) {
+                    for (let e of enemiesRef.current) {
+                        if (p.x < e.x + e.width && p.x + p.width > e.x && p.y < e.y + e.height && p.y + p.height > e.y) {
                             createParticles(p.x + p.width/2, p.y + p.height/2, '#3b82f6', 40);
                             setGameState('GAME_OVER');
                         }
                     }
 
-                    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-                        const pt = particlesRef.current[i];
+                    particlesRef.current.forEach((pt, i) => {
                         pt.x += pt.vx; pt.y += pt.vy; pt.life -= 1;
-                        if (pt.
+                        if (pt.life <= 0) particlesRef.current.splice(i, 1);
+                    });
+
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.beginPath();
+                    ctx.moveTo(p.x + p.width / 2, p.y);
+                    ctx.lineTo(p.x + p.width, p.y + p.height);
+                    ctx.lineTo(p.x, p.y + p.height);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.fillStyle = '#facc15';
+                    bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+                    enemiesRef.current.forEach(e => {
+                        ctx.fillStyle = e.maxHp > 1 ? '#ea580c' : '#ef4444';
+                        ctx.fillRect(e.x, e.y, e.width, e.height);
+                    });
+
+                    particlesRef.current.forEach(pt => {
+                        ctx.globalAlpha = pt.life / pt.maxLife;
+                        ctx.fillStyle = pt.color;
+                        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+                    });
+                    ctx.globalAlpha = 1.0;
+                    frameCountRef.current++;
+                }
+                requestRef.current = requestAnimationFrame(update);
+            }, [gameState, createParticles, initGame]);
+
+            useEffect(() => {
+                requestRef.current = requestAnimationFrame(update);
+                return () => cancelAnimationFrame(requestRef.current);
+            }, [update]);
+
+            useEffect(() => {
+                const dn = (e) => keysRef.current[e.code] = true;
+                const up = (e) => keysRef.current[e.code] = false;
+                window.addEventListener('keydown', dn);
+                window.addEventListener('keyup', up);
+                return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
+            }, []);
+
+            const handlePointerMove = (e) => {
+                if (gameState !== 'PLAYING') return;
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const x = (e.clientX - rect.left) * scaleX;
+                playerRef.current.x = x - playerRef.current.width / 2;
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 select-none">
+                    <div className="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800">
+                        <div className="absolute top-4 left-4 z-10 text-white font-mono text-xl font-bold">SCORE: {score}</div>
+                        <canvas 
+                            ref={canvasRef} 
+                            width={CANVAS_WIDTH} 
+                            height={CANVAS_HEIGHT} 
+                            className="block w-full max-w-[400px] h-auto touch-none" 
+                            onPointerMove={handlePointerMove}
+                            onPointerDown={handlePointerMove}
+                        />
+                        {gameState === 'MENU' && (
+                            <div className="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center">
+                                <h1 className="text-4xl font-black text-blue-500 mb-6">SPACE SHOOTER</h1>
+                                <button onClick={startGame} className="px-10 py-4 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-500">START GAME</button>
+                            </div>
+                        )}
+                        {gameState === 'GAME_OVER' && (
+                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center">
+                                <h2 className="text-5xl font-black text-red-500 mb-2">GAME OVER</h2>
+                                <p className="text-white text-2xl mb-8">SCORE: {score}</p>
+                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold hover:bg-slate-200">PLAY AGAIN</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

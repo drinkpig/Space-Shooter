@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter Pro - v2.0</title>
+    <title>Space Shooter: Shield Edition</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -35,8 +35,6 @@
 
         const CANVAS_WIDTH = 400;
         const CANVAS_HEIGHT = 600;
-        const PLAYER_SPEED = 7;
-        const BULLET_SPEED = 12;
 
         function App() {
             const canvasRef = useRef(null);
@@ -44,16 +42,17 @@
             const [score, setScore] = useState(0);
             const [highScore, setHighScore] = useState(parseInt(localStorage.getItem('space_high_score') || '0'));
 
-            const playerRef = useRef({ x: 180, y: 540, width: 40, height: 40, powerLevel: 1 });
+            // 增加 hasShield 属性
+            const playerRef = useRef({ x: 180, y: 540, w: 40, h: 40, powerLevel: 1, hasShield: true });
             const bulletsRef = useRef([]);
             const enemiesRef = useRef([]);
+            const itemsRef = useRef([]); // 新增道具数组
             const particlesRef = useRef([]);
             const starsRef = useRef([]);
             const frameCountRef = useRef(0);
             const keysRef = useRef({});
             const requestRef = useRef();
 
-            // 初始化星星
             useEffect(() => {
                 starsRef.current = Array.from({length: 80}, () => ({
                     x: Math.random() * CANVAS_WIDTH,
@@ -63,7 +62,6 @@
                 }));
             }, []);
 
-            // 粒子系统
             const createParticles = (x, y, color, count) => {
                 for (let i = 0; i < count; i++) {
                     const angle = Math.random() * Math.PI * 2;
@@ -77,8 +75,8 @@
 
             const startGame = () => {
                 initAudio();
-                playerRef.current = { x: 180, y: 540, width: 40, height: 40, powerLevel: 1 };
-                bulletsRef.current = []; enemiesRef.current = []; particlesRef.current = [];
+                playerRef.current = { x: 180, y: 540, w: 40, h: 40, powerLevel: 1, hasShield: true };
+                bulletsRef.current = []; enemiesRef.current = []; itemsRef.current = []; particlesRef.current = [];
                 setScore(0); setGameState('PLAYING');
             };
 
@@ -87,7 +85,6 @@
                 const ctx = canvas?.getContext('2d');
                 if (!canvas || !ctx) return;
 
-                // 绘制背景
                 ctx.fillStyle = '#020617'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
                 ctx.fillStyle = '#ffffff';
                 starsRef.current.forEach(s => {
@@ -97,27 +94,22 @@
                 ctx.globalAlpha = 1.0;
 
                 if (gameState === 'PLAYING') {
-                    // 升级逻辑：每500分提升火力
                     playerRef.current.powerLevel = Math.floor(score / 500) + 1;
 
-                    // 移动
-                    if (keysRef.current['ArrowLeft'] && playerRef.current.x > 0) playerRef.current.x -= PLAYER_SPEED;
-                    if (keysRef.current['ArrowRight'] && playerRef.current.x < CANVAS_WIDTH - 40) playerRef.current.x += PLAYER_SPEED;
+                    if (keysRef.current['ArrowLeft'] && playerRef.current.x > 0) playerRef.current.x -= 7;
+                    if (keysRef.current['ArrowRight'] && playerRef.current.x < CANVAS_WIDTH - 40) playerRef.current.x += 7;
 
-                    // 自动射击
                     if (frameCountRef.current % 10 === 0) {
                         const p = playerRef.current;
                         if (p.powerLevel === 1) {
                             bulletsRef.current.push({ x: p.x + 17, y: p.y, w: 6, h: 15 });
                         } else {
-                            // 双倍火力
                             bulletsRef.current.push({ x: p.x + 5, y: p.y, w: 6, h: 15 });
                             bulletsRef.current.push({ x: p.x + 29, y: p.y, w: 6, h: 15 });
                         }
                         playEffect(800, 'triangle', 0.05, 0.05);
                     }
 
-                    // 生成敌人
                     if (frameCountRef.current % 40 === 0) {
                         const isTough = Math.random() > 0.8;
                         enemiesRef.current.push({
@@ -127,21 +119,21 @@
                         });
                     }
 
-                    // 更新子弹和敌人
-                    bulletsRef.current.forEach((b, i) => { b.y -= BULLET_SPEED; if(b.y < 0) bulletsRef.current.splice(i, 1); });
-                    enemiesRef.current.forEach((e, i) => { 
-                        e.y += e.speed; 
-                        if(e.y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1); 
-                    });
+                    // 更新逻辑
+                    bulletsRef.current.forEach((b, i) => { b.y -= 12; if(b.y < 0) bulletsRef.current.splice(i, 1); });
+                    enemiesRef.current.forEach((e, i) => { e.y += e.speed; if(e.y > CANVAS_HEIGHT) enemiesRef.current.splice(i, 1); });
+                    itemsRef.current.forEach((it, i) => { it.y += 3; if(it.y > CANVAS_HEIGHT) itemsRef.current.splice(i, 1); });
 
-                    // 碰撞逻辑
+                    // 碰撞逻辑：子弹与敌人
                     enemiesRef.current.forEach((e, ei) => {
-                        // 子弹中敌
                         bulletsRef.current.forEach((b, bi) => {
                             if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
                                 bulletsRef.current.splice(bi, 1); e.hp--;
                                 createParticles(b.x, b.y, '#facc15', 2);
                                 if (e.hp <= 0) {
+                                    if (e.type === 'elite' && Math.random() < 0.3) {
+                                        itemsRef.current.push({ x: e.x + e.w/2 - 10, y: e.y, w: 20, h: 20 });
+                                    }
                                     enemiesRef.current.splice(ei, 1);
                                     setScore(s => s + (e.type === 'elite' ? 50 : 10));
                                     playEffect(150, 'sawtooth', 0.2, 0.1);
@@ -149,32 +141,60 @@
                                 }
                             }
                         });
-                        // 敌人撞玩家
+
+                        // 玩家碰撞敌人
                         const p = playerRef.current;
                         if (p.x < e.x + e.w && p.x + 40 > e.x && p.y < e.y + e.h && p.y + 40 > e.y) {
-                            setGameState('GAME_OVER');
-                            playEffect(100, 'square', 0.5, 0.2);
+                            if (p.hasShield) {
+                                p.hasShield = false;
+                                enemiesRef.current.splice(ei, 1);
+                                createParticles(p.x + 20, p.y + 20, '#60a5fa', 20);
+                                playEffect(300, 'square', 0.3, 0.2);
+                            } else {
+                                setGameState('GAME_OVER');
+                                playEffect(100, 'square', 0.5, 0.2);
+                            }
                         }
+                    });
+
+                    // 玩家捡道具
+                    itemsRef.current.forEach((it, i) => {
+                        const p = playerRef.current;
+                        if (p.x < it.x + it.w && p.x + 40 > it.x && p.y < it.y + it.h && p.y + 40 > it.y) {
+                            itemsRef.current.splice(i, 1);
+                            if (p.hasShield) setScore(s => s + 100);
+                            else p.hasShield = true;
+                            playEffect(1200, 'sine', 0.2, 0.1);
+                        }
+                    });
+
+                    // 绘制道具
+                    itemsRef.current.forEach(it => {
+                        ctx.fillStyle = '#4ade80';
+                        ctx.save();
+                        ctx.translate(it.x + 10, it.y + 10);
+                        ctx.rotate(frameCountRef.current * 0.1);
+                        ctx.fillRect(-8, -8, 16, 16);
+                        ctx.restore();
                     });
 
                     // 绘制玩家
                     const p = playerRef.current;
                     ctx.fillStyle = '#3b82f6'; ctx.beginPath();
                     ctx.moveTo(p.x + 20, p.y); ctx.lineTo(p.x + 40, p.y + 40); ctx.lineTo(p.x, p.y + 40); ctx.fill();
-                    // 引擎火焰
-                    ctx.fillStyle = '#fbbf24'; ctx.fillRect(p.x + 15, p.y + 40, 10, Math.random() * 10);
+                    // 绘制护盾
+                    if (p.hasShield) {
+                        ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3;
+                        ctx.beginPath(); ctx.arc(p.x + 20, p.y + 20, 35, 0, Math.PI*2); ctx.stroke();
+                        ctx.globalAlpha = 0.2; ctx.fillStyle = '#60a5fa'; ctx.fill(); ctx.globalAlpha = 1.0;
+                    }
 
-                    // 绘制子弹
-                    ctx.fillStyle = '#facc15';
-                    bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
-
-                    // 绘制敌人
+                    ctx.fillStyle = '#facc15'; bulletsRef.current.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
                     enemiesRef.current.forEach(e => {
                         ctx.fillStyle = e.type === 'elite' ? '#f97316' : '#ef4444';
                         ctx.fillRect(e.x, e.y, e.w, e.h);
                     });
 
-                    // 粒子动画
                     particlesRef.current.forEach((pt, i) => {
                         pt.x += pt.vx; pt.y += pt.vy; pt.life--;
                         ctx.globalAlpha = pt.life / 30; ctx.fillStyle = pt.color;
@@ -191,7 +211,6 @@
                 return () => cancelAnimationFrame(requestRef.current);
             }, [update]);
 
-            // 处理最高分
             useEffect(() => {
                 if (gameState === 'GAME_OVER' && score > highScore) {
                     setHighScore(score); localStorage.setItem('space_high_score', score.toString());
@@ -208,36 +227,33 @@
             const handleTouch = (e) => {
                 if (gameState !== 'PLAYING') return;
                 const rect = canvasRef.current.getBoundingClientRect();
-                const x = (e.clientX || e.touches[0].clientX) - rect.left;
+                const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
                 playerRef.current.x = (x * CANVAS_WIDTH / rect.width) - 20;
             };
 
             return (
                 <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 select-none font-mono" onTouchStart={initAudio} onClick={initAudio}>
-                    <div className="relative bg-slate-900 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-[0_0_50px_rgba(59,130,246,0.2)]">
+                    <div className="relative bg-slate-900 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl">
                         <div className="absolute top-4 left-4 z-10 text-blue-400 font-bold text-lg">
                             SCORE: {score}<br/>
                             <span className="text-sm text-slate-500">BEST: {highScore}</span>
                         </div>
-                        {score >= 500 && gameState === 'PLAYING' && (
-                            <div className="absolute top-4 right-4 z-10 text-yellow-400 animate-pulse font-bold">POWER LVL {Math.floor(score/500)+1}</div>
-                        )}
                         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="block w-full max-w-[400px] h-auto touch-none" 
                             onPointerMove={handleTouch} onPointerDown={handleTouch} />
                         
                         {gameState === 'MENU' && (
-                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center">
-                                <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-b from-blue-400 to-blue-700 mb-8 tracking-tighter">STAR HUNTER</h1>
-                                <button onClick={startGame} className="px-12 py-4 bg-blue-600 text-white rounded-full font-bold text-xl hover:bg-blue-500 shadow-lg shadow-blue-900/50 transition-all active:scale-95">LAUNCH MISSION</button>
-                                <p className="mt-6 text-slate-500 text-sm italic">Move to survive. Fire is automatic.</p>
+                            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-center p-6">
+                                <h1 className="text-4xl font-black text-blue-500 mb-2">SHIELD DEFENDER</h1>
+                                <p className="text-slate-400 text-sm mb-8">Destroy Elite Ships to get Shield Refills!</p>
+                                <button onClick={startGame} className="px-12 py-4 bg-blue-600 text-white rounded-full font-bold text-xl hover:bg-blue-500 transition-all">START MISSION</button>
                             </div>
                         )}
                         
                         {gameState === 'GAME_OVER' && (
-                            <div className="absolute inset-0 bg-red-950/40 backdrop-blur-sm flex flex-col items-center justify-center text-center">
-                                <h2 className="text-6xl font-black text-white mb-2">CRASHED</h2>
-                                <p className="text-red-400 text-2xl mb-8 font-bold">FINAL SCORE: {score}</p>
-                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg hover:bg-slate-200 transition-all active:scale-95">REPAIR & RE-LAUNCH</button>
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
+                                <h2 className="text-5xl font-black text-white mb-2">MISSION FAILED</h2>
+                                <p className="text-blue-400 text-2xl mb-8 font-bold">SCORE: {score}</p>
+                                <button onClick={startGame} className="px-10 py-4 bg-white text-slate-900 rounded-full font-bold text-lg">RETRY</button>
                             </div>
                         )}
                     </div>
